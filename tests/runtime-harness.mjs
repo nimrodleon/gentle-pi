@@ -342,12 +342,27 @@ async function run() {
 		assert.equal(existsSync(join(globalAgentHome, "agents", "sdd-apply.md")), true);
 		assert.equal(existsSync(join(globalAgentHome, "agents", "sdd-sync.md")), true);
 		assert.equal(existsSync(join(globalAgentHome, "chains", "sdd-full.chain.md")), true);
-		const lazySettings = JSON.parse(await readFile(join(lazySddCwd, ".pi", "settings.json"), "utf8"));
-		assert.equal(lazySettings.subagents.agentOverrides["sdd-apply"].model, "openai/gpt-5");
-		assert.equal(lazySettings.subagents.agentOverrides["sdd-apply"].thinking, "high");
+		const globalSddApply = await readFile(
+			join(globalAgentHome, "agents", "sdd-apply.md"),
+			"utf8",
+		);
+		assert.match(globalSddApply, /model: openai\/gpt-5/);
+		assert.match(globalSddApply, /thinking: high/);
+		const lazySettingsPath = join(lazySddCwd, ".pi", "settings.json");
+		if (existsSync(lazySettingsPath)) {
+			const lazySettings = JSON.parse(await readFile(lazySettingsPath, "utf8"));
+			assert.equal(
+				lazySettings.subagents?.agentOverrides?.["sdd-apply"],
+				undefined,
+				"global SDD model routing must be materialized in agent frontmatter, not project settings overrides",
+			);
+		}
 		assert.equal(ctx.ui.selections.length, 3);
 		assert.deepEqual(ctx.ui.selections[1].options, ["openspec"]);
 		assert.match(ctx.ui.notifications.at(-1).message, /SDD preflight complete/);
+		await commands.get("gentle-ai:status").handler("", ctx);
+		assert.match(ctx.ui.notifications.at(-1).message, /Global SDD assets stale: 0 file\(s\)/);
+		assert.doesNotMatch(ctx.ui.notifications.at(-1).message, /install-sdd --force/);
 
 		await inputHook({ text: "/sdd-plan another change", source: "interactive" }, ctx);
 		assert.equal(ctx.ui.selections.length, 3, "preflight should run only once per session");

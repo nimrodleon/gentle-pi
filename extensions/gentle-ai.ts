@@ -53,10 +53,17 @@ function sddGlobalAssetDriftCount(): number {
 					stale += 1;
 					continue;
 				}
-				if (
-					readFileSync(join(assetDir, entry.name), "utf8") !==
-					readFileSync(installedPath, "utf8")
-				) {
+				const packaged = readFileSync(join(assetDir, entry.name), "utf8");
+				const installed = readFileSync(installedPath, "utf8");
+				const comparablePackaged =
+					assetSubdir === "agents"
+						? updateFrontmatterRouting(packaged, undefined)
+						: packaged;
+				const comparableInstalled =
+					assetSubdir === "agents"
+						? updateFrontmatterRouting(installed, undefined)
+						: installed;
+				if (comparablePackaged !== comparableInstalled) {
 					stale += 1;
 				}
 			} catch {
@@ -607,14 +614,15 @@ async function listAgentsFromDirAsync(
 }
 
 function listDiscoverableAgents(cwd: string): AgentEntry[] {
+	const globalAgentDir = join(gentlePiAgentHome(), "agents");
 	const builtinDirs = [
-		join(gentlePiAgentHome(), "agents"),
 		join(PACKAGE_ROOT, "..", "pi-subagents", "agents"),
 		join(cwd, ".pi", "npm", "node_modules", "pi-subagents", "agents"),
 		join(homedir(), ".local", "lib", "node_modules", "pi-subagents", "agents"),
 	];
 	const agents = [
 		...builtinDirs.flatMap((dir) => listAgentsFromDir(dir, "builtin")),
+		...listAgentsFromDir(globalAgentDir, "user"),
 		...listAgentsFromDir(join(homedir(), ".agents"), "user"),
 		...listAgentsFromDir(join(cwd, ".agents"), "project"),
 		...listAgentsFromDir(join(cwd, ".pi", "agents"), "project"),
@@ -632,8 +640,8 @@ function listDiscoverableAgents(cwd: string): AgentEntry[] {
 }
 
 async function listDiscoverableAgentsAsync(cwd: string): Promise<AgentEntry[]> {
+	const globalAgentDir = join(gentlePiAgentHome(), "agents");
 	const builtinDirs = [
-		join(gentlePiAgentHome(), "agents"),
 		join(PACKAGE_ROOT, "..", "pi-subagents", "agents"),
 		join(cwd, ".pi", "npm", "node_modules", "pi-subagents", "agents"),
 		join(homedir(), ".local", "lib", "node_modules", "pi-subagents", "agents"),
@@ -643,6 +651,7 @@ async function listDiscoverableAgentsAsync(cwd: string): Promise<AgentEntry[]> {
 		agents.push(...(await listAgentsFromDirAsync(dir, "builtin")));
 	}
 	const otherDirs: Array<[string, AgentSource]> = [
+		[globalAgentDir, "user"],
 		[join(homedir(), ".agents"), "user"],
 		[join(cwd, ".agents"), "project"],
 		[join(cwd, ".pi", "agents"), "project"],
