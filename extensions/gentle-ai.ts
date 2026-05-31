@@ -188,8 +188,29 @@ const CONFIRM_BASH_PATTERNS: RegExp[] = [
 	/\bpi\s+remove\b/,
 ];
 
+const PATH_GUARDED_TOOL_NAMES = new Set(["read", "write", "edit"]);
+const PATH_INPUT_KEYS = new Set([
+	"path",
+	"paths",
+	"file",
+	"files",
+	"filePath",
+	"filePaths",
+]);
+const SENSITIVE_PATH_PATTERNS: RegExp[] = [
+	/(^|\/)\.ssh(?:\/|$)/,
+	/(^|\/)\.credentials(?:\/|$)/,
+	/(^|\/)library\/keychains(?:\/|$)/,
+	/(^|\/)\.aws\/credentials$/,
+	/(^|\/)\.config\/gh\/hosts\.ya?ml$/,
+	/(^|\/)secrets(?:\/|$)/,
+	/(^|\/)\.env(?:$|[./_-])/,
+	/\.(?:pem|key|p12|pfx)$/,
+];
+
 const SDD_AGENT_NAMES = [
 	"sdd-init",
+	"sdd-onboard",
 	"sdd-explore",
 	"sdd-proposal",
 	"sdd-spec",
@@ -298,6 +319,62 @@ function evaluateDeniedCommand(
 
 function commandRequiresConfirmation(command: string): boolean {
 	return CONFIRM_BASH_PATTERNS.some((pattern) => pattern.test(command));
+}
+
+function normalizePolicyPath(value: string): string {
+	return value.trim().replace(/^~(?=\/|$)/, homedir()).replace(/\\/g, "/").toLowerCase();
+}
+
+function isSensitivePath(value: string): boolean {
+	const normalized = normalizePolicyPath(value);
+	return SENSITIVE_PATH_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+function collectPathInputs(value: unknown, key?: string): string[] {
+	if (typeof value === "string") return key && PATH_INPUT_KEYS.has(key) ? [value] : [];
+	if (Array.isArray(value)) return value.flatMap((item) => collectPathInputs(item, key));
+	if (!isRecord(value)) return [];
+	return Object.entries(value).flatMap(([entryKey, entryValue]) =>
+		collectPathInputs(entryValue, entryKey),
+	);
+}
+
+function hasWritableEngramTool(pi: ExtensionAPI): boolean {
+	try {
+		const getActiveTools = (pi as unknown as { getActiveTools?: () => unknown[] })
+			.getActiveTools;
+		if (typeof getActiveTools !== "function") return false;
+		const tools = getActiveTools.call(pi);
+		return tools.some((tool) => {
+			const name =
+				typeof tool === "string"
+					? tool
+					: isRecord(tool) && typeof tool.name === "string"
+						? tool.name
+						: "";
+			return (
+				name === "mem_save" ||
+				name === "engram_mem_save" ||
+				name.endsWith(".mem_save") ||
+				name.endsWith(".engram_mem_save")
+			);
+		});
+	} catch {
+		return false;
+	}
+}
+
+function evaluateSensitivePathTool(
+	toolName: string,
+	input: unknown,
+): ToolCallEventResult | undefined {
+	if (!PATH_GUARDED_TOOL_NAMES.has(toolName)) return undefined;
+	const sensitivePath = collectPathInputs(input).find(isSensitivePath);
+	if (!sensitivePath) return undefined;
+	return {
+		block: true,
+		reason: `Gentle AI safety policy blocked access to sensitive path: ${sanitizeTerminalText(sensitivePath)}. Ask the user for an explicit safer plan.`,
+	};
 }
 
 async function confirmCommand(
@@ -1405,6 +1482,11 @@ export default function gentleAi(pi: ExtensionAPI): void {
 	});
 
 	pi.on("tool_call", async (event, ctx) => {
+		const sensitivePathDenied = evaluateSensitivePathTool(
+			event.toolName,
+			event.input,
+		);
+		if (sensitivePathDenied) return sensitivePathDenied;
 		if (event.toolName !== "bash") return undefined;
 		if (!isRecord(event.input) || typeof event.input.command !== "string")
 			return undefined;
@@ -1478,6 +1560,50 @@ export default function gentleAi(pi: ExtensionAPI): void {
 		description: "Compatibility alias for /gentle:persona.",
 		handler: async (_args, ctx) => {
 			await handlePersonaCommand(ctx);
+		},
+	});
+
+	pi.registerCommand("gentle-ai:doctor", {
+		description: "Run read-only Gentle AI diagnostics for this Pi workspace.",
+		handler: async (_args, ctx) => {
+			const agentsInstalled = existsSync(
+				join(gentlePiAgentHome(), "agents", "sdd-apply.md"),
+			);
+			const chainsInstalled = existsSync(
+				join(gentlePiAgentHome(), "chains", "sdd-full.chain.md"),
+			);
+			const openspecConfigured = existsSync(
+				join(ctx.cwd, "openspec", "config.yaml"),
+			);
+			const skillRegistryPresent = existsSync(
+				join(ctx.cwd, ".atl", "skill-registry.md"),
+			);
+			const staleSddAssets = sddGlobalAssetDriftCount();
+			const staleLocalOverrides = sddLocalOverrideDriftCount(ctx.cwd);
+			const modelConfig = await readSavedModelConfigAsync(ctx.cwd);
+			const engramActive = hasWritableEngramTool(pi);
+			const lines = [
+				"el Gentleman doctor",
+				`${agentsInstalled ? "pass" : "fail"}: Global SDD agents ${agentsInstalled ? "installed" : "missing"}`,
+				`${chainsInstalled ? "pass" : "fail"}: Global SDD chains ${chainsInstalled ? "installed" : "missing"}`,
+				`${staleSddAssets === 0 ? "pass" : "warn"}: Global SDD asset drift ${staleSddAssets} file(s)`,
+				`${staleLocalOverrides === 0 ? "pass" : "warn"}: Project-local SDD override drift ${staleLocalOverrides} file(s)`,
+				`${openspecConfigured ? "pass" : "warn"}: OpenSpec config ${openspecConfigured ? "present" : "missing"}`,
+				`${skillRegistryPresent ? "pass" : "warn"}: Skill registry ${skillRegistryPresent ? "present" : "missing"}`,
+				`${modelConfig.status === "invalid" ? "fail" : "pass"}: Global model config ${modelConfig.status}`,
+				"pass: Sensitive-path guard active for read/write/edit tools",
+				`${engramActive ? "pass" : "warn"}: Engram memory tools ${engramActive ? "active" : "not active in this session"}`,
+			];
+			if (!agentsInstalled || !chainsInstalled) {
+				lines.push("remedy: run /gentle-ai:install-sdd --force to refresh global SDD assets intentionally");
+			}
+			if (modelConfig.status === "invalid") {
+				lines.push(`remedy: fix or remove ${modelConfig.path}`);
+			}
+			ctx.ui.notify(
+				lines.join("\n"),
+				lines.some((line) => line.startsWith("fail:")) ? "warning" : "info",
+			);
 		},
 	});
 

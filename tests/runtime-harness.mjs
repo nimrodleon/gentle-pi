@@ -27,6 +27,7 @@ const EXPECTED_COMMANDS = [
 	"gentle-ai:persona",
 	"gentleman:persona",
 	"gentle-ai:status",
+	"gentle-ai:doctor",
 	"sdd-init",
 	"skill-registry:refresh",
 ];
@@ -202,6 +203,15 @@ async function run() {
 			false,
 			"normal agent startup must not run SDD preflight",
 		);
+		const onboardCtx = createCtx(promptCwd, true, "sdd-onboard-session");
+		onboardCtx.ui.select = async (_label, options) => options[0];
+		const onboardPromptResult = await promptHook(
+			{ agentName: "sdd-onboard", systemPrompt: "onboard base" },
+			onboardCtx,
+		);
+		assert.match(onboardPromptResult.systemPrompt, /onboard base/);
+		assert.match(onboardPromptResult.systemPrompt, /## SDD Session Preflight/);
+		assert.equal(existsSync(join(globalAgentHome, "agents", "sdd-onboard.md")), true);
 	} finally {
 		await rm(promptCwd, { recursive: true, force: true });
 	}
@@ -213,6 +223,14 @@ async function run() {
 		const denied = await toolHook({ toolName: "bash", input: { command: "rm -rf /" } }, createCtx(toolCwd));
 		assert.equal(denied.block, true);
 		assert.match(denied.reason, /destructive/);
+		const sensitiveRead = await toolHook({ toolName: "read", input: { path: join(toolCwd, ".env.local") } }, createCtx(toolCwd));
+		assert.equal(sensitiveRead.block, true);
+		assert.match(sensitiveRead.reason, /sensitive path/);
+		const sensitiveWrite = await toolHook({ toolName: "write", input: { path: join(toolCwd, "secrets", "token.txt"), content: "x" } }, createCtx(toolCwd));
+		assert.equal(sensitiveWrite.block, true);
+		const sensitiveEdit = await toolHook({ toolName: "edit", input: { edits: [], path: join(toolCwd, "id_rsa.pem") } }, createCtx(toolCwd));
+		assert.equal(sensitiveEdit.block, true);
+		assert.equal(await toolHook({ toolName: "read", input: { path: join(toolCwd, "src", "index.ts") } }, createCtx(toolCwd)), undefined);
 		const needsConfirm = await toolHook({ toolName: "bash", input: { command: "git push" } }, createCtx(toolCwd));
 		assert.equal(needsConfirm.block, true);
 		assert.match(needsConfirm.reason, /confirmation/);
@@ -524,6 +542,13 @@ async function run() {
 		await commands.get("gentle-ai:status").handler("", ctx);
 		assert.match(ctx.ui.notifications.at(-1).message, /Project-local SDD override drift: \d+ file\(s\)/);
 		assert.match(ctx.ui.notifications.at(-1).message, /gentle-ai:install-sdd --force/);
+		await commands.get("gentle-ai:doctor").handler("", ctx);
+		assert.match(ctx.ui.notifications.at(-1).message, /el Gentleman doctor/);
+		assert.match(ctx.ui.notifications.at(-1).message, /Sensitive-path guard active/);
+		pi.setActiveTools([{ name: "engram.mem_save" }]);
+		await commands.get("gentle-ai:doctor").handler("", ctx);
+		assert.match(ctx.ui.notifications.at(-1).message, /Engram memory tools active/);
+		pi.setActiveTools(["read", "bash", "edit", "write"]);
 	} finally {
 		await rm(staleAssetsCwd, { recursive: true, force: true });
 	}

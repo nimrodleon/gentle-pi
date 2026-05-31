@@ -62,6 +62,7 @@ function userSkillDirs(): string[] {
 		join(home, ".claude/skills"),
 		join(home, ".gemini/skills"),
 		join(home, ".gemini/antigravity/skills"),
+		join(home, ".trae/skills"),
 		join(home, ".cursor/skills"),
 		join(home, ".copilot/skills"),
 		join(home, ".codex/skills"),
@@ -78,6 +79,7 @@ function projectSkillDirs(cwd: string): string[] {
 		join(cwd, ".opencode/skills"),
 		join(cwd, ".claude/skills"),
 		join(cwd, ".gemini/skills"),
+		join(cwd, ".trae/skills"),
 		join(cwd, ".cursor/skills"),
 		join(cwd, ".github/skills"),
 		join(cwd, ".codex/skills"),
@@ -116,11 +118,12 @@ async function findSkillFiles(root: string): Promise<string[]> {
 }
 
 function parseFrontmatter(source: string): { name?: string; description?: string; body: string } {
-	if (!source.startsWith("---\n")) return { body: source };
-	const end = source.indexOf("\n---", 4);
-	if (end === -1) return { body: source };
-	const fm = source.slice(4, end);
-	const body = source.slice(end + 4).replace(/^\n/, "");
+	const normalized = source.replace(/\r\n?/g, "\n");
+	if (!normalized.startsWith("---\n")) return { body: normalized };
+	const end = normalized.indexOf("\n---", 4);
+	if (end === -1) return { body: normalized };
+	const fm = normalized.slice(4, end);
+	const body = normalized.slice(end + 4).replace(/^\n/, "");
 	const out: { name?: string; description?: string } = {};
 	const lines = fm.split("\n");
 	for (let i = 0; i < lines.length; i++) {

@@ -14,6 +14,7 @@ test("project skill dirs include supported workspace roots", () => {
 		".opencode/skills",
 		".claude/skills",
 		".gemini/skills",
+		".trae/skills",
 		".cursor/skills",
 		".github/skills",
 		".codex/skills",
@@ -48,6 +49,17 @@ test("registry renders indexed skill paths instead of compact rules", () => {
 	assert.doesNotMatch(registry, /Selected skills and compact rules/);
 	assert.doesNotMatch(registry, /Project Standards \(auto-resolved\)/);
 	assert.doesNotMatch(registry, /Rules:/);
+});
+
+test("frontmatter parser accepts CRLF line endings", () => {
+	const parsed = __testing.parseFrontmatter("---\r\nname: windows-skill\r\ndescription: >\r\n  Trigger: Windows-authored skills.\r\n  Preserve frontmatter metadata.\r\n---\r\n\r\n## Body\r\n");
+
+	assert.equal(parsed.name, "windows-skill");
+	assert.equal(
+		parsed.description,
+		"Trigger: Windows-authored skills. Preserve frontmatter metadata.",
+	);
+	assert.match(parsed.body, /## Body/);
 });
 
 test("frontmatter parser keeps full multiline descriptions", () => {
