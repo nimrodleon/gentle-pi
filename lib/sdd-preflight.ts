@@ -235,6 +235,16 @@ export function renderSddPreflightPrompt(prefs: SddPreflightPreferences): string
 	const sourceLine = prefs.prompted
 		? "The user already chose these SDD preferences for this Pi session. Reuse them unless the user explicitly changes them."
 		: "No interactive UI was available for SDD preflight, so these default preferences were applied for this Pi session. Ask the user before making delivery decisions that depend on them.";
+	const interactiveRules =
+		prefs.executionMode === "interactive"
+			? [
+					"- Interactive phase gate: complete only the current SDD phase. Do not start the next SDD phase unless the current user turn explicitly approves that next phase.",
+					"- In interactive mode, words like `continue`, `dale`, or `go on` approve only the immediate next phase, not all remaining phases.",
+					"- Before writing an SDD proposal in interactive mode, offer the user a proposal question round to improve the PRD/proposal by uncovering business rules, implications, impact, edge cases, product tradeoffs, and decision gaps. Prefer 3–5 concrete product questions per round, then summarize assumptions and ask whether the user wants corrections or a second question round. Do not ask about test commands, PR shape, changed-line budget, or other harness mechanics at proposal time unless the user explicitly asks to discuss delivery.",
+				]
+			: [
+					"- Auto mode: phases may run back-to-back only because the user chose speed and trusts the flow.",
+				];
 	return [
 		"## SDD Session Preflight",
 		sourceLine,
@@ -242,6 +252,7 @@ export function renderSddPreflightPrompt(prefs: SddPreflightPreferences): string
 		`- Artifact store: ${prefs.artifactStore}${prefs.engramAvailable ? "" : " (Engram unavailable in this session)"}`,
 		`- Chained PR strategy: ${prefs.chainedPrStrategy}`,
 		`- Review budget: ${prefs.reviewBudgetLines} changed lines`,
+		...interactiveRules,
 		"- If task/workload forecasts conflict with these preferences, pause before sdd-apply and ask the user for a delivery decision.",
 	].join("\n");
 }

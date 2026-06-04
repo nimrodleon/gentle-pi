@@ -73,9 +73,49 @@ test("rendered SDD preflight prompt is English artifact copy", () => {
 
 	assert.match(prompt, /The user already chose these SDD preferences/);
 	assert.match(prompt, /Review budget: 400 changed lines/);
+	assert.match(prompt, /complete only the current SDD phase/i);
+	assert.match(prompt, /Do not start the next SDD phase/i);
+	assert.match(prompt, /approve only the immediate next phase/i);
+	assert.match(prompt, /offer the user a proposal question round/i);
+	assert.match(prompt, /business rules, implications, impact, edge cases/i);
+	assert.match(prompt, /second question round/i);
 	for (const pattern of SPANISH_PREFLIGHT_COPY) {
 		assert.doesNotMatch(prompt, pattern);
 	}
+});
+
+test("SDD proposal questions focus on business and PRD gaps", async () => {
+	const proposalAgent = await readFile(join(ROOT, "assets/agents/sdd-proposal.md"), "utf8");
+
+	assert.match(proposalAgent, /offer the user a proposal question round/i);
+	assert.match(proposalAgent, /second question round/i);
+	assert.match(proposalAgent, /business problem/i);
+	assert.match(proposalAgent, /business rules/i);
+	assert.match(proposalAgent, /implications and impact/i);
+	assert.match(proposalAgent, /edge cases/i);
+	assert.match(proposalAgent, /target users/i);
+	assert.match(proposalAgent, /product outcome/i);
+	assert.match(proposalAgent, /decision gaps/i);
+	// Proposal-shaping questions must stay on business/product ground: the agent is
+	// explicitly told to keep harness mechanics out of the proposal question round
+	// unless the user opts into discussing delivery. Removing this guard is the most
+	// likely way harness mechanics would leak back into proposal questions.
+	assert.match(
+		proposalAgent,
+		/Do not ask about test commands, PR shape, changed-line budget, or other harness decisions unless the user explicitly asks to discuss delivery/i,
+	);
+});
+
+test("SDD chain assets distinguish interactive gates from auto execution", async () => {
+	const planChain = await readFile(join(ROOT, "assets/chains/sdd-plan.chain.md"), "utf8");
+	const fullChain = await readFile(join(ROOT, "assets/chains/sdd-full.chain.md"), "utf8");
+
+	assert.match(planChain, /auto mode or explicit all-planning approval/i);
+	assert.match(planChain, /interactive mode/i);
+	assert.match(planChain, /must stop after sdd-proposal/i);
+	assert.match(fullChain, /auto mode or explicit full-lifecycle approval/i);
+	assert.match(fullChain, /interactive mode/i);
+	assert.match(fullChain, /must stop at each phase boundary/i);
 });
 
 test("persistent harness prompt assets do not hardcode Spanish SDD artifact copy", async () => {
