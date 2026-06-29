@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -27,7 +27,7 @@ function readPackageJson(): PackageJson {
 	}
 }
 
-test("package manifest installs and loads pi-pretty without bundling native optional dependencies", () => {
+test("package manifest installs pi-pretty through a wrapper without bundling native optional dependencies", () => {
 	const packageJson = readPackageJson();
 
 	assert.equal(
@@ -36,10 +36,18 @@ test("package manifest installs and loads pi-pretty without bundling native opti
 		"gentle-pi must install the tested pi-pretty version as a normal dependency",
 	);
 	assert.ok(
-		packageJson.pi?.extensions?.includes(
+		packageJson.pi?.extensions?.includes("./extensions"),
+		"gentle-pi must load packaged extension wrappers",
+	);
+	assert.ok(
+		!packageJson.pi?.extensions?.includes(
 			"./node_modules/@heyhuynhgiabuu/pi-pretty/dist/index.js",
 		),
-		"gentle-pi must load the pi-pretty extension from its installed dependency",
+		"gentle-pi must not reference pnpm-unportable nested node_modules paths",
+	);
+	assert.ok(
+		existsSync(join(PACKAGE_ROOT, "extensions", "pi-pretty.ts")),
+		"gentle-pi must expose pi-pretty through a packaged wrapper extension",
 	);
 	assert.ok(
 		!packageJson.bundledDependencies?.includes("@heyhuynhgiabuu/pi-pretty"),
