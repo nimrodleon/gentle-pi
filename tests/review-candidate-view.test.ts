@@ -404,6 +404,71 @@ test("candidate view fails closed before dispatch when the changed scope itself 
 	}
 });
 
+test("candidate view accepts internal relative symlink targets and rejects unsafe lexical targets", (t) => {
+	const acceptedRoot = repository(t);
+	const acceptedTarget = "../../.agents/skills/example";
+	const acceptedLink = join(acceptedRoot, ".agent", "skills", "example");
+	mkdirSync(join(acceptedRoot, ".agents", "skills", "example"), { recursive: true });
+	mkdirSync(join(acceptedRoot, ".agent", "skills"), { recursive: true });
+	writeFileSync(join(acceptedRoot, ".agents", "skills", "example", "SKILL.md"), "example\n");
+	try {
+		symlinkSync(acceptedTarget, acceptedLink);
+	} catch {
+		t.skip("platform does not support symlinks");
+		return;
+	}
+	const accepted = createCandidateView({ contributorRoot: acceptedRoot });
+	try {
+		assert.equal(lstatSync(acceptedLink).isSymbolicLink(), true);
+		assert.equal(readFileSync(join(accepted.root, ".agent", "skills", "example", "SKILL.md"), "utf8"), "example\n");
+		accepted.verify();
+	} finally {
+		accepted.cleanup();
+	}
+
+	for (const [name, target] of [
+		["escape", "../escape"],
+		["absolute", "/absolute-target"],
+		["Windows drive absolute", "C:/absolute-target"],
+		["lowercase Windows drive absolute", "c:/absolute-target"],
+		["metadata", ".git"],
+		["control", "unsafe\ntarget"],
+		["backslash", "unsafe\\target"],
+		["empty segment", "unsafe//target"],
+	] as const) {
+		const contributorRoot = repository(t);
+		try {
+			symlinkSync(target, join(contributorRoot, "candidate-link"));
+		} catch {
+			t.skip("platform does not support symlinks");
+			return;
+		}
+		assert.throws(() => createCandidateView({ contributorRoot }), (error: unknown) => error instanceof CandidateViewError, name);
+	}
+});
+
+test("candidate view detects symlink target-byte tampering after materialization", (t) => {
+	const contributorRoot = repository(t);
+	const link = join(contributorRoot, "candidate-link");
+	try {
+		symlinkSync("safe-target", link);
+	} catch {
+		t.skip("platform does not support symlinks");
+		return;
+	}
+	const view = createCandidateView({ contributorRoot });
+	try {
+		const frozenLink = join(view.root, "candidate-link");
+		chmodSync(view.root, 0o755);
+		rmSync(frozenLink);
+		symlinkSync("other-target", frozenLink);
+		chmodSync(view.root, 0o555);
+		assert.throws(() => view.verify(), CandidateViewError);
+	} finally {
+		view.cleanup();
+	}
+});
+
 test("candidate view retains a valid dangling symlink through bind and finalize resolution", (t) => {
 	const contributorRoot = repository(t);
 	try {

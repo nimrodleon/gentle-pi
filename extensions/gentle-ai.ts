@@ -4499,9 +4499,13 @@ function nativeStartRejection(reason: string, field?: string): Record<string, un
 }
 
 function nativeOperationFailure(operation: ReviewControllerOperation, error: unknown): Record<string, unknown> {
-	const value = error as { mutationOutcome?: unknown; nextAction?: unknown; diagnostics?: unknown; launchAttempted?: unknown };
+	const value = error as { mutationOutcome?: unknown; nextAction?: unknown; diagnostics?: unknown; launchAttempted?: unknown; candidateViewPreNative?: unknown };
 	const mutationOutcome = value.mutationOutcome === "unknown" ? "unknown" : "none";
-	const diagnostics = error instanceof NativeReviewCliError ? error.diagnostics : undefined;
+	const diagnostics = error instanceof NativeReviewCliError
+		? error.diagnostics
+		: operation === REVIEW_CONTROLLER_OPERATION.START && error instanceof CandidateViewError && value.candidateViewPreNative === true
+			? { code: error.reason, message: "candidate view rejected before native START" }
+			: undefined;
 	return {
 		operation,
 		status: "blocked",
@@ -4892,8 +4896,10 @@ async function executeReviewControllerOperation(
 			}
 			const replayKey = JSON.stringify({ cwd: defaultCwd, lineageId: parameters.lineageId ?? null, input: parameters.input ?? null, inputPath: parameters.inputPath ?? null });
 			let candidateView: ReturnType<CandidateViewRegistry["create"]> | undefined;
+			let nativeStartAttempted = false;
 			try {
 				candidateView = candidateViews?.createOrReuse({ contributorRoot: defaultCwd, replayKey, ...(canonicalBaseRef === undefined ? {} : { baseRef: canonicalBaseRef, committedOnly: true }) });
+				nativeStartAttempted = true;
 				const result = await nativeReviewCli.start({
 					cwd: candidateView?.root ?? defaultCwd,
 					...(canonicalBaseRef === undefined
@@ -4914,13 +4920,16 @@ async function executeReviewControllerOperation(
 				if (error instanceof CandidateViewError && (error.reason === "base-ref-ambiguous" || error.reason === "base-ref-unresolvable" || error.reason === "base-ref-moved")) return nativeStartRejection(error.reason);
 				const value = error as { mutationOutcome?: unknown; nextAction?: unknown };
 				const provenNoMutation = value.mutationOutcome === "none";
-				if (candidateView && candidateViews && provenNoMutation) candidateViews.cleanup(candidateView.token);
+				const preNativeCandidateFailure = !nativeStartAttempted && error instanceof CandidateViewError;
+				if (candidateView && candidateViews && (provenNoMutation || preNativeCandidateFailure)) candidateViews.cleanup(candidateView.token);
 				const failure = provenNoMutation
 					? error
-					: Object.assign(error instanceof Error ? error : new Error(String(error)), {
-						mutationOutcome: "unknown",
-						nextAction: "replay-exact-native-operation",
-					});
+					: preNativeCandidateFailure
+						? Object.assign(error, { candidateViewPreNative: true })
+						: Object.assign(error instanceof Error ? error : new Error(String(error)), {
+							mutationOutcome: "unknown",
+							nextAction: "replay-exact-native-operation",
+						});
 				return nativeOperationFailure(parameters.operation, failure);
 			}
 		}

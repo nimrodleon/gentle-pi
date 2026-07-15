@@ -702,6 +702,30 @@ test("native error has no compact fallback and ambiguous mutation demands exact 
 	assert.deepEqual(result.details, { operation: "start", status: "blocked", outcome: "native-operation-failed", mutation_performed: false, mutation_outcome: "unknown", next_action: "replay-exact-native-operation" });
 });
 
+test("native START preserves a candidate-view diagnostic before native invocation", async (t) => {
+	const cwd = repository(t);
+	try {
+		symlinkSync("../escape", join(cwd, "unsafe-link"));
+	} catch {
+		t.skip("platform does not support symlinks");
+		return;
+	}
+	let starts = 0;
+	const { controller } = runtime(fakeNative({
+		start: async () => {
+			starts += 1;
+			return { lineageId: "must-not-start", state: "reviewing", riskLevel: "medium", selectedLenses: ["review-reliability"], changedFiles: 1, changedLines: 1, correctionBudget: 1, action: "created", lensesRequired: true };
+		},
+	}), undefined, undefined, undefined, new CandidateViewRegistry());
+	const result = await controller.execute("unsafe-symlink-start", { operation: "start", input: JSON.stringify({ mode: "ordinary" }) }, undefined, undefined, context(cwd));
+	const details = result.details as Record<string, unknown>;
+	assert.equal(details.outcome, "native-operation-failed");
+	assert.equal(details.mutation_outcome, "none");
+	assert.equal(details.next_action, "resolve-native-operation-failure");
+	assert.deepEqual(details.diagnostics, { code: "candidate-view-invalid", message: "candidate view rejected before native START" });
+	assert.equal(starts, 0);
+});
+
 test("native START uses the default policy or a canonical safe policy path, and rejects unsafe policy inputs before native calls", async (t) => {
 	const cwd = repository(t);
 	const policyDirectory = join(cwd, ".gentle-ai", "policies");

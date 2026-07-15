@@ -147,6 +147,26 @@ function decodeCanonicalPath(value: Buffer): string {
 	return path;
 }
 
+function assertSafeSymlinkTarget(root: string, entryPath: string, value: Buffer): void {
+	const target = value.toString("utf8");
+	if (
+		!Buffer.from(target, "utf8").equals(value) ||
+		target.length === 0 ||
+		isAbsolute(target) ||
+		/^[A-Za-z]:\//.test(target) ||
+		target.includes("\\") ||
+		/[\u0000-\u001f\u007f]/.test(target) ||
+		target.split("/").some((segment) => segment.length === 0 || segment === ".")
+	) {
+		throw new CandidateViewError("candidate view symlink target is unsafe");
+	}
+	const resolvedTarget = resolve(dirname(join(root, entryPath)), target);
+	const metadata = join(root, ".git");
+	if (!isWithin(root, resolvedTarget) || resolvedTarget === metadata || isWithin(metadata, resolvedTarget)) {
+		throw new CandidateViewError("candidate view symlink target escapes its frozen root or enters metadata");
+	}
+}
+
 function splitNulTerminated(raw: Buffer, errorMessage: string): Buffer[] {
 	if (raw.length === 0) return [];
 	if (raw.at(-1) !== 0) throw new CandidateViewError(errorMessage);
@@ -221,7 +241,7 @@ function entryContentHash(root: string, entry: CandidateViewEntry): string {
 		if (!item.isSymbolicLink()) throw new CandidateViewError("candidate view symlink does not match its frozen tree");
 		const target = readlinkSync(path, "buffer");
 		const bytes = Buffer.isBuffer(target) ? target : Buffer.from(target);
-		decodeCanonicalPath(bytes);
+		assertSafeSymlinkTarget(root, entry.path, bytes);
 		return createHash("sha256").update(bytes).digest("hex");
 	}
 	if (!item.isFile() || item.isSymbolicLink()) throw new CandidateViewError("candidate view entry does not match its frozen tree");
